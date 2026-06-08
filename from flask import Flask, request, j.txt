@@ -1,0 +1,799 @@
+from flask import Flask, request, jsonify, render_template, session, redirect, send_file
+from flask_cors import CORS
+import sqlite3
+import pandas as pd
+from datetime import datetime
+import re
+import qrcode
+from io import BytesIO
+app = Flask(__name__)
+CORS(app)
+
+# -----------------------------------
+# SECRET KEY
+# -----------------------------------
+
+app.secret_key = "simple-admin-key-2026"
+
+
+# -----------------------------------
+# PASSWORD STRENGTH FUNCTION
+# -----------------------------------
+
+def check_strength(password):
+
+    score = 0
+
+    if len(password) >= 8:
+        score += 1
+
+    if re.search(r"[A-Z]", password):
+        score += 1
+
+    if re.search(r"[a-z]", password):
+        score += 1
+
+    if re.search(r"[0-9]", password):
+        score += 1
+
+    if re.search(r"[@$!%*?&]", password):
+        score += 1
+
+    if score <= 2:
+        return "Weak"
+
+    elif score <= 4:
+        return "Medium"
+
+    else:
+        return "Strong"
+
+
+# -----------------------------------
+# INIT DATABASE
+# -----------------------------------
+
+def init_db():
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+
+        CREATE TABLE IF NOT EXISTS logs (
+
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user TEXT NOT NULL,
+            password TEXT,
+            action TEXT NOT NULL,
+            details TEXT,
+            time TEXT NOT NULL
+
+        )
+
+        """)
+
+        conn.commit()
+
+#------------------------------------
+#Backup Excel Sheet
+#------------------------------------
+def backup_logs():
+    conn = sqlite3.connect('logs.db')
+    df = pd.read_sql_query("SELECT * FROM logs", conn)
+    conn.close()
+    df.to_excel("backup_logs.xlsx", index=False)
+# -----------------------------------
+# HOME PAGE
+# -----------------------------------
+
+@app.route('/')
+def home():
+
+    return """
+
+    <h1>Security Awareness Server</h1>
+
+    <ul>
+
+        <li>
+            <a href='/email'>
+                Phishing Email Simulation
+            </a>
+        </li>
+
+        <li>
+            <a href='/facebook-login'>
+                Fake Facebook Login
+            </a>
+        </li>
+
+        <li>
+            <a href='/bank-update'>
+                Bank Update Simulation
+            </a>
+        </li>
+        <li>
+            <a href='/wifi-qr'>
+            WiFi QR Code
+            </a>
+        </li>
+        <li>
+            <a href='/signup-page'>
+                Password Strength Test
+            </a>
+        </li>
+
+        <li>
+            <a href='/sensitive'>
+                Sensitive Data Test
+            </a>
+        </li>
+        <li>
+
+            <a href='/wifi'>
+                Open Wi-Fi Awareness
+            </a>
+        </li>
+        <li>
+            <a href='/short-link'>
+                Short Link Awareness
+            </a>
+        </li>
+        <li>
+            <a href='/admin-login'>
+                Admin Dashboard
+            </a>
+        </li>
+
+    </ul>
+
+    """
+
+
+# -----------------------------------
+# PAGES
+# -----------------------------------
+
+@app.route('/email')
+def email_page():
+    return render_template('email.html')
+
+
+@app.route('/facebook-login')
+def facebook_login():
+    return render_template('facebook_login.html')
+
+
+@app.route('/bank-update')
+def bank_update():
+    return render_template('bank_update.html')
+
+
+@app.route('/signup-page')
+def signup_page():
+    return render_template('sls.html')
+
+
+@app.route('/sensitive')
+def sensitive_page():
+    return render_template('sensitive.html')
+
+@app.route('/email-link')
+def email_link():
+    return render_template('email_link.html')
+
+
+# -----------------------------------
+# ADMIN LOGIN
+# -----------------------------------
+
+@app.route('/admin-login', methods=['GET', 'POST'])
+def admin_login():
+
+    if request.method == 'POST':
+
+        username = request.form.get('username')
+        password = request.form.get('password')
+
+        if username == "admin" and password == "admin123":
+
+            session['admin'] = True
+
+            return redirect('/show')
+
+        return """
+
+        <h2 style='color:red;text-align:center;margin-top:100px;'>
+        Invalid Admin Credentials
+        </h2>
+
+        """
+
+    return """
+
+    <!DOCTYPE html>
+
+    <html>
+
+    <head>
+
+        <title>Admin Login</title>
+
+        <style>
+
+            body{
+                font-family:Arial;
+                background:#f4f4f4;
+                text-align:center;
+                margin-top:100px;
+            }
+
+            form{
+                background:white;
+                width:300px;
+                margin:auto;
+                padding:30px;
+                border-radius:10px;
+                box-shadow:0 0 10px rgba(0,0,0,0.2);
+}
+
+            input{
+                width:90%;
+                padding:10px;
+                margin:10px;
+            }
+
+            button{
+                padding:10px 20px;
+                background:#007bff;
+                color:white;
+                border:none;
+                cursor:pointer;
+            }
+
+        </style>
+
+    </head>
+
+    <body>
+
+        <form method="POST">
+
+            <h2>Admin Login</h2>
+
+            <input
+                type="text"
+                name="username"
+                placeholder="Username"
+            >
+
+            <input
+                type="password"
+                name="password"
+                placeholder="Password"
+            >
+
+            <button type="submit">
+                Login
+            </button>
+
+        </form>
+
+    </body>
+
+    </html>
+
+    """
+
+
+# -----------------------------------
+# LOGOUT
+# -----------------------------------
+
+@app.route('/logout')
+def logout():
+
+    session.pop('admin', None)
+
+    return redirect('/')
+
+
+# -----------------------------------
+# FAKE FACEBOOK LOGIN
+# -----------------------------------
+
+@app.route('/login', methods=['POST'])
+def login():
+
+    email = request.form.get('email')
+    password = request.form.get('password')
+
+    ip = request.remote_addr
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+
+            INSERT INTO logs(user, password, action, details, time)
+            VALUES (?, ?, ?, ?, ?)
+
+        """, (
+
+        email,
+        password,
+        "Fake Facebook Login",
+        f"IP: {ip}",
+        datetime.now().isoformat()
+
+    ))
+
+        conn.commit()
+    backup_logs()
+    return render_template('fake_login_awareness.html')
+
+
+# -----------------------------------
+# DOWNLOAD
+# -----------------------------------
+
+@app.route('/download', methods=['GET','POST'])
+def download():
+
+    ip = request.remote_addr
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+
+            INSERT INTO logs(user, action, details, time)
+            VALUES (?, ?, ?, ?)
+
+        """, (
+
+            "Unknown",
+            "Fake Software Download",
+            f"IP: {ip}",
+            datetime.now().isoformat()
+
+        ))
+
+        conn.commit()
+    backup_logs()
+    return render_template('download_awareness.html')
+
+
+
+# -----------------------------------
+
+@app.route('/generate-qr')
+def generate_qr():
+
+    qr_data = request.host_url + "wifi"
+
+    qr = qrcode.make(qr_data)
+
+    img_io = BytesIO()
+
+    qr.save(img_io, 'PNG')
+
+    img_io.seek(0)
+
+    return send_file(
+        img_io,
+        mimetype='image/png'
+    )
+# -----------------------------------
+
+@app.route('/wifi')
+def wifi():
+
+    ip = request.remote_addr
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+        INSERT INTO logs(user, action, details, time)
+        VALUES (?, ?, ?, ?)
+        """,(
+
+            "Visitor",
+            "Opened WiFi Page",
+            f"IP: {ip}",
+            datetime.now().isoformat()
+
+        ))
+
+        conn.commit()
+    backup_logs()
+    return render_template('wifi.html')
+
+@app.route('/connect', methods=['POST'])
+def connect():
+
+    ip = request.remote_addr
+    ua = request.headers.get('User-Agent')
+
+    if 'iPhone' in ua:
+        device = 'iPhone'
+
+    elif 'Android' in ua:
+        device = 'Android'
+
+    elif 'Windows' in ua:
+        device = 'Windows'
+
+    else:
+        device = 'Unknown'
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+        INSERT INTO logs(user, action, details, time)
+        VALUES (?, ?, ?, ?)
+        """, (
+
+            device,
+            "Connected To Open WiFi",
+            f"IP: {ip}",
+            datetime.now().isoformat()
+
+        ))
+
+        conn.commit()
+    backup_logs()
+    return render_template(
+        "warning.html",
+        device=device,
+        ip=ip,
+        time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    )
+@app.route('/wifi-qr')
+def wifi_qr_page():
+
+    return """
+    <html>
+
+    <head>
+        <title>Free WiFi</title>
+
+        <style>
+
+        body{
+            background:#111;
+            font-family:Arial;
+            text-align:center;
+            padding-top:50px;
+        }
+
+        .card{
+            width:450px;
+            margin:auto;
+            background:#222;
+            padding:30px;
+            border-radius:20px;
+            box-shadow:0 0 20px rgba(0,255,100,.3);
+        }
+
+        h1{
+            color:#00ff88;
+        }
+
+        p{
+            color:white;
+        }
+
+        img{
+            background:white;
+            padding:15px;
+            border-radius:15px;
+        }
+
+        </style>
+
+    </head>
+
+    <body>
+
+        <div class="card">
+
+            <h1>📶 FREE WIFI</h1>
+
+            <p>Scan QR Code To Connect</p>
+
+            <img src="/generate-qr" width="250">
+
+        </div>
+
+    </body>
+
+    </html>
+    """
+#-----------------------------------
+#Short Link 
+#-----------------------------------
+@app.route('/short-link')
+def short_link():
+
+    ip = request.remote_addr
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+            INSERT INTO logs(user, action, details, time)
+            VALUES (?, ?, ?, ?)
+        """, (
+
+            "Unknown",
+            "Short Link Opened",
+            f"IP: {ip}",
+            datetime.now().isoformat()
+
+        ))
+
+        conn.commit()
+
+    return render_template('short_link.html')
+#-----------------------------------
+#Claim Reward from link
+#-----------------------------------
+@app.route('/claim-reward', methods=['POST'])
+def claim_reward():
+
+    ip = request.remote_addr
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+            INSERT INTO logs(user, action, details, time)
+            VALUES (?, ?, ?, ?)
+        """, (
+
+            "Unknown",
+            "Clicked Short Link Reward",
+            f"IP: {ip}",
+            datetime.now().isoformat()
+
+        ))
+
+        conn.commit()
+
+    return render_template('short_link_awareness.html')
+# -----------------------------------
+# PASSWORD STRENGTH TEST
+# -----------------------------------
+
+@app.route('/sls', methods=['POST'])
+def sls():
+
+    fullname = request.form.get('fullname')
+    email = request.form.get('email')
+    user_type = request.form.get('type')
+    password = request.form.get('password')
+
+    strength = check_strength(password)
+
+    ip = request.remote_addr
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+
+            INSERT INTO logs(user, action, details, time)
+            VALUES (?, ?, ?, ?)
+
+        """, (
+
+            email,
+            "SLS Signup Attempt",
+            f"Password Strength: {strength} | IP: {ip}",
+            datetime.now().isoformat()
+
+        ))
+
+        conn.commit()
+    backup_logs()
+    if strength == "Weak":
+          return """
+
+    <div style='
+        text-align:center;
+        margin-top:100px;
+        font-family:Arial;
+    '>
+
+        <h1 style='color:red;'>
+            Weak Password Detected
+        </h1>
+
+        <p style='font-size:22px;'>
+
+            Your password could be easily guessed by attackers.
+
+            <br><br>
+
+            Consider using:
+
+            <br>✔ Uppercase letters
+
+            <br>✔ Numbers
+
+            <br>✔ Special characters
+
+        </p>
+
+    </div>
+
+    """
+
+  
+    elif strength == "Medium":
+        return """
+        <h1 style='color:orange;text-align:center;margin-top:100px;'>
+        Medium Password - Try Stronger Password
+        </h1>
+        """
+   
+    else:
+        return f"""
+        <h1 style='color:green;text-align:center;margin-top:100px;'>
+        Strong Password - Account Created Successfully
+        </h1>
+        <p style='text-align:center;'>
+        Welcome {fullname}<br>
+        Email: {email}<br>
+        Type: {user_type}
+        </p>
+        """
+
+# -----------------------------------
+# SENSITIVE DATA TEST
+# -----------------------------------
+
+@app.route('/sensitive-submit', methods=['POST'])
+def sensitive_submit():
+
+    full_name = request.form.get('fullname')
+
+    ip = request.remote_addr
+
+    with sqlite3.connect('logs.db') as conn:
+
+        c = conn.cursor()
+
+        c.execute("""
+
+            INSERT INTO logs(user, action, details, time)
+            VALUES (?, ?, ?, ?)
+
+        """, (
+
+            full_name,
+            "Sensitive Data Request Test",
+            f"Collected data attempt from IP: {ip}",
+            datetime.now().isoformat()
+
+        ))
+
+        conn.commit()
+    backup_logs()
+    return """
+
+    <h1 style='color:red;text-align:center;margin-top:100px;font-family:Arial;'>
+    ⚠ Sensitive Data Awareness Alert
+    </h1>
+
+    <p style='text-align:center;font-size:20px;font-family:Arial;'>
+
+    You entered sensitive information into a test page.<br><br>
+
+    Never share:
+    <br>- National ID
+    <br>- Passwords
+    <br>- Personal phone data
+
+    </p>
+
+    """
+
+
+# -----------------------------------
+# BACKUP LOGS
+# -----------------------------------
+
+@app.route('/backup-logs')
+def backup_logs_download():
+
+    if not session.get('admin'):
+        return "Access Denied", 403
+
+    backup_logs()
+
+    return send_file(
+        "backup_logs.xlsx",
+        as_attachment=True
+    )
+# -----------------------------------
+# ADMIN DASHBOARD
+# -----------------------------------
+
+@app.route('/show')
+def show():
+
+    if not session.get('admin'):
+
+        return """
+        <h2 style='color:red;text-align:center;margin-top:100px;'>
+        403 Access Denied (Admin Only)
+        </h2>
+        """, 403
+
+    conn = sqlite3.connect('logs.db')
+    c = conn.cursor()
+
+    # Get all logs
+    c.execute("SELECT * FROM logs ORDER BY id DESC")
+    data = c.fetchall()
+
+    # Statistics
+    c.execute("SELECT COUNT(*) FROM logs WHERE action='Fake Facebook Login'")
+    facebook_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM logs WHERE action='Connected To Open WiFi'")
+    wifi_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM logs WHERE action='Sensitive Data Request Test'")
+    sensitive_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM logs WHERE action='Fake Software Download'")
+    download_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM logs WHERE action='SLS Signup Attempt'")
+    password_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM logs WHERE action='Clicked Short Link Reward'")
+    shortlink_count = c.fetchone()[0]
+
+    total_logs = len(data)
+
+    conn.close()
+
+    return render_template(
+        "dashboard.html",
+        logs=data,
+        total_logs=total_logs,
+        facebook_count=facebook_count,
+        wifi_count=wifi_count,
+        sensitive_count=sensitive_count,
+        download_count=download_count,
+        password_count=password_count,
+        shortlink_count=shortlink_count
+    )
+# -----------------------------------
+# RUN SERVER
+# -----------------------------------
+
+if __name__ == '__main__':
+
+    init_db()
+
+    app.run(
+        host='0.0.0.0',
+        port=5000,
+        debug=True
+    )
